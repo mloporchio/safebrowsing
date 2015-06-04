@@ -9,8 +9,7 @@
 #include <curl/curl.h>
 
 #define CATEGORIZATION_URL "https://sb-ssl.google.com/safebrowsing/api/lookup"
-#define CLIENT "ntopng"
-#define APIKEY "ABQIAAAAXvY7RNqD0ZXs1w0jW2CGTRS9IRPbEtejJMhL9X_PdOU4Y_zLPg"
+#define CLIENT "safebrowsing"
 #define APPVER "1.0"
 #define PVER "3.0"
 
@@ -118,45 +117,74 @@ char *curlGet(char *URL, long *http_code) {
 
 // NOTICE: Remember to call the program by passing the URL as first (and unique) parameter!
 int main(int argc, char const *argv[]) {
+  FILE *keyfile;
   long reply = 0;
   //char BASE_URL[] = "http://ianfette.org"; // An example of malicious domain.
+  char APIKEY[512];
   char REQUEST_URL[1024];
   char REQUEST_REPLY[1024];
+
+  // Checking if the categorization key is already stored in file "categorization.key".
+  keyfile = fopen("categorization.key", "r");
+  if (keyfile != NULL) {
+    // File already exists. Reading the key from the file.
+    size_t len = 0;
+    char *buf = malloc(512*sizeof(char));
+    getline(&buf, &len, keyfile);
+    snprintf(APIKEY, sizeof(APIKEY), "%s", buf);
+  }
+  else {
+    // File does not exist. We create the file and ask for the key to be stored in it.
+    printf("Please insert your categorization key below.\n");
+    char *buf = (char *) malloc(512*sizeof(char));
+    scanf("%s", buf);
+    keyfile = fopen("categorization.key", "w+");
+    if (keyfile != NULL) {
+        fputs(buf, keyfile);
+        fclose(keyfile);
+    }
+    else {
+      printf("Something went wrong while creating the file: categorization.key\n");
+      return 1;
+    }
+    snprintf(APIKEY, sizeof(APIKEY), "%s", buf);
+  }
+
+
   snprintf(REQUEST_URL, sizeof(REQUEST_URL), "%s?client=%s&apikey=%s&appver=%s&pver=%s&url=%s", CATEGORIZATION_URL, CLIENT, APIKEY,
     APPVER, PVER, urlEncode((char *) argv[1]));
 
   snprintf(REQUEST_REPLY, sizeof(REQUEST_REPLY), "%s", curlGet(REQUEST_URL, &reply));
-  //printf("%s\n", REQUEST_REPLY);
-  //printf("\n");
 
   if (REQUEST_REPLY[0] == '\0') {
-    snprintf(REQUEST_REPLY, sizeof(REQUEST_REPLY), "good");
+    snprintf(REQUEST_REPLY, sizeof(REQUEST_REPLY), "safe");
   }
 
-
-  printf("GET request performed correctly with URL: %s\n", REQUEST_URL);
   if (reply == 0) {
-    printf("Something went wrong, but the error is yours!\n");
+    printf("Something went wrong while performing your request.\n");
+    return 1;
   }
   else {
+    printf("GET request performed correctly with URL: %s\n", REQUEST_URL);
+    printf("\n");
     if (reply == 200) {
-      printf("Everything went fine, your code is 200: OK.\n");
+      printf("Your code is: 200 OK.\n");
       printf("\n");
       printf("The website %s seems to be %s.\n", argv[1], REQUEST_REPLY);
       printf("\n");
     }
     else {
       if (reply == 204) {
-        printf("Everything went fine, your code is 204: NO CONTENT.\n");
+        printf("Your code is: 204 NO CONTENT.\n");
         printf("\n");
         printf("The website %s seems to be %s.\n", argv[1], REQUEST_REPLY);
         printf("\n");
       }
       else {
         if (reply == 400) {
-          printf("The request you performed was invalid, your code is 400: BAD REQUEST.\n");
+          printf("Your code is: 400 BAD REQUEST. (Please check the syntax of your URL!)\n");
         }
-        else printf("Your code was: %ld\n", reply);
+        else printf("Your code is: %ld\n", reply);
       }
     }
   }
