@@ -56,6 +56,7 @@ buffer_t *newBuffer() {
 	to write curl output to a variable.
 */
 size_t write_f(void *ptr, size_t size, size_t nmemb, buffer_t *buf) {
+	if (!ptr || !buf) return 0;
 	size_t buf_len = buf -> l, new_len = buf_len + (size * nmemb);
 	buf -> s = realloc(buf -> s, new_len + 1);
 	if (!(buf -> s)) return 0;
@@ -116,29 +117,34 @@ char *urlEncode(char *url) {
 
 /*
 	This function performs a GET operation using libcurl,
-	starting from URL and storing the HTTP reply code
-	in the 'http_code' parameter.
+	starting from 'url' and storing the HTTP reply code
+	in the 'http_code' parameter and curl result in 'exit_code'.
 	The function returns a string containing the operation output.
 */
-char *curlGet(char *URL, long *http_code, CURLcode *exit_code) {
+char *curlGet(char *url, long *http_code, CURLcode *exit_code) {
 	CURL *curl;
 	CURLcode result;
 	long reply_code = 0;
+	char *reply_msg = NULL;
 	if ((curl = curl_easy_init())) {
 		buffer_t *reply_buf = newBuffer();
 		if (!reply_buf) {
 			curl_easy_cleanup(curl);
 			return NULL;
 		}
-		curl_easy_setopt(curl, CURLOPT_URL, URL);
+		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_f);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, reply_buf);
 		result = curl_easy_perform(curl);
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &reply_code);
 		*exit_code = result;
 		*http_code = reply_code;
+		reply_msg = strdup(reply_buf -> s);
 		curl_easy_cleanup(curl);
-		return (reply_buf -> s);
+		curl_global_cleanup();
+		free(reply_buf -> s);
+		free(reply_buf);
+		return reply_msg;
 	}
 	return NULL;
 }
@@ -171,7 +177,8 @@ int main(int argc, char const *argv[]) {
 			fprintf(stderr,
 			"Something went wrong while reading from file.\n");
 			return EXIT_FAILURE;
-		}		
+		}
+		fclose(keyfile);	
 	}
 	else {
 		/* 
@@ -198,31 +205,36 @@ int main(int argc, char const *argv[]) {
 	}
 
 	// Creating request URL.
-	encoded_url = urlEncode((char *) argv[1]);
+	if (!(encoded_url = urlEncode((char *) argv[1]))) {
+		fprintf(stderr,
+		"Something went wrong while encoding the URL.\n");
+		return EXIT_FAILURE;
+	}
 	snprintf(request_url, sizeof(request_url), 
 	"%s?client=%s&apikey=%s&appver=%s&pver=%s&url=%s",
 	CATEGORIZATION_URL, CLIENT, apikey,
 	APPVER, PVER, encoded_url);
 	free(encoded_url);
 
-	// Performing request.
-	get_result = curlGet(request_url, &http_reply, &curl_exit);
+	// Performing request and checking result.
+	get_result = curlGet(request_url, &http_reply, &curl_exit);	
 	if (!get_result) {
-		fprintf(stderr,
-		"Error: curl request failed.\n");
+		// curlGet function failed.
+		fprintf(stderr, "Error: curl request failed.\n");
 		return EXIT_FAILURE;
 	}
 	if (curl_exit != CURLE_OK) {
+		// curlGet didn't fail, but returned a failure code.
 		fprintf(stderr,
 		"Error: curl request failed with code %s.\n",
 		curl_easy_strerror(curl_exit));
 		free(get_result);
 		return EXIT_FAILURE;
 	}
-	// Copying result.
+	// Copying result and cleaning up memory.
 	memcpy(request_reply, get_result, sizeof(request_reply));
 	free(get_result);
-
+		
 	// Checking if request reply is empty.
 	if (request_reply[0] == '\0') {
 		snprintf(request_reply, sizeof(request_reply), REPLY_SAFE);
